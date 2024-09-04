@@ -1,7 +1,28 @@
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use std::time::Duration;
+
+use axum::{
+    error_handling::HandleErrorLayer, http::StatusCode, response::IntoResponse, routing::get, Json,
+    Router,
+};
+use futures::executor::block_on;
+use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
 use serde::{Deserialize, Serialize};
+use tower::{BoxError, ServiceBuilder};
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
+
+const DATABASE_URL: &str = "postgres://root:password@127.0.0.1:5432";
+const DB_NAME: &str = "dev";
+
+async fn run() -> Result<(), DbErr> {
+    let db: DatabaseConnection =
+        Database::connect("postgres://root:password@127.0.0.1:5432/dev").await?;
+
+    let url = format!("{}/{}", DATABASE_URL, DB_NAME);
+    println!("{}", url);
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() {
@@ -14,15 +35,33 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let app = Router::new().route("/todos", get(todos_index).post(todos_create));
+    if let Err(err) = block_on(run()) {
+        panic!("{}", err);
+    }
+
+    let app = Router::new()
+        .route("/todos", get(todos_index).post(todos_create))
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|error: BoxError| async move {
+                    if error.is::<tower::timeout::error::Elapsed>() {
+                        Ok(StatusCode::REQUEST_TIMEOUT)
+                    } else {
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {error}"),
+                        ))
+                    }
+                }))
+                .timeout(Duration::from_secs(10))
+                .layer(TraceLayer::new_for_http())
+                .into_inner(),
+        );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    println!("listening on {} 🚀", addr);
-
+    tracing::debug!("listening on {} 🚀", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }
 
