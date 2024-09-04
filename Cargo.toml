@@ -1,0 +1,13 @@
+[package]
+name = "axum-todos"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7.5"
+dotenvy = "0.15.7"
+serde = "1.0.209"
+tower = "0.5.0"
+tower-http = "0.5.2"
+tracing-subscriber = "0.3.18"
+uuid = "1.10.0"
